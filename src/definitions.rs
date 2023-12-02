@@ -217,6 +217,7 @@ bitflags! {
 
 bitflags! {
     /// Flags for configuring `Allocation` construction.
+    #[derive(Debug, Clone, Copy)]
     pub struct AllocationCreateFlags: u32 {
         /// Set this flag if the allocation should have its own memory block.
         ///
@@ -416,7 +417,7 @@ where
     }
 
     pub fn flags(mut self, flags: AllocatorCreateFlags) -> Self {
-        self.inner.flags = flags.bits;
+        self.inner.flags = flags.bits();
         self
     }
 
@@ -488,7 +489,7 @@ impl<'a> PoolCreateInfo<'a> {
     }
 
     pub fn flags(mut self, flags: &AllocatorPoolCreateFlags) -> Self {
-        self.inner.flags = flags.bits;
+        self.inner.flags = flags.bits();
         self
     }
 
@@ -523,7 +524,7 @@ impl<'a> PoolCreateInfo<'a> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct AllocationCreateInfo {
     pub flags: AllocationCreateFlags,
     /// Intended usage of memory.
@@ -694,6 +695,7 @@ bitflags! {
 
 bitflags! {
     /// Flags for configuring `VirtualBlock` construction
+    #[derive(Debug, Clone, Copy)]
     pub struct VirtualAllocationCreateFlags: u32 {
         /// Allocation will be created from upper stack in a double stack pool.
         ///
