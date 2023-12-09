@@ -46,6 +46,14 @@ pub struct Allocation(ffi::VmaAllocation);
 unsafe impl Send for Allocation {}
 unsafe impl Sync for Allocation {}
 
+impl Default for Allocation{
+    fn default() -> Self {
+        Self{
+            0: unsafe {std::mem::zeroed()}
+        }
+    }
+}
+
 impl Allocator {
     /// Constructor a new `Allocator` using the provided options.
     pub fn new<'a, I, D>(mut create_info: AllocatorCreateInfo<'a, I, D>) -> VkResult<Self>
