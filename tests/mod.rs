@@ -97,26 +97,24 @@ impl TestHarness {
                 .expect("Physical device error")
         };
 
-        let (physical_device, queue_family_index) = unsafe {
-            physical_devices
+        let physical_device = unsafe {
+            *physical_devices
                 .iter()
-                .map(|physical_device| {
-                    instance
-                        .get_physical_device_queue_family_properties(*physical_device)
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, _)| Some((*physical_device, index)))
-                        .nth(0)
+                .filter(|physical_device| {
+                    let version = instance
+                        .get_physical_device_properties(**physical_device)
+                        .api_version;
+                    ash::vk::api_version_major(version) == 1
+                        && ash::vk::api_version_minor(version) == 3
                 })
-                .filter_map(|v| v)
-                .nth(0)
+                .next()
                 .expect("Couldn't find suitable device.")
         };
 
         let priorities = [1.0];
 
         let queue_info = [ash::vk::DeviceQueueCreateInfo::builder()
-            .queue_family_index(queue_family_index as u32)
+            .queue_family_index(0)
             .queue_priorities(&priorities)
             .build()];
 
@@ -167,7 +165,7 @@ fn create_gpu_buffer() {
     };
 
     unsafe {
-        let (buffer, allocation) = allocator
+        let (buffer, mut allocation) = allocator
             .create_buffer(
                 &ash::vk::BufferCreateInfo::builder()
                     .size(16 * 1024)
@@ -179,9 +177,9 @@ fn create_gpu_buffer() {
                 &allocation_info,
             )
             .unwrap();
-        let allocation_info = allocator.get_allocation_info(&allocation).unwrap();
+        let allocation_info = allocator.get_allocation_info(&allocation);
         assert_eq!(allocation_info.mapped_data, std::ptr::null_mut());
-        allocator.destroy_buffer(buffer, allocation);
+        allocator.destroy_buffer(buffer, &mut allocation);
     }
 }
 
@@ -197,7 +195,7 @@ fn create_cpu_buffer_preferred() {
         ..Default::default()
     };
     unsafe {
-        let (buffer, allocation) = allocator
+        let (buffer, mut allocation) = allocator
             .create_buffer(
                 &ash::vk::BufferCreateInfo::builder()
                     .size(16 * 1024)
@@ -209,9 +207,9 @@ fn create_cpu_buffer_preferred() {
                 &allocation_info,
             )
             .unwrap();
-        let allocation_info = allocator.get_allocation_info(&allocation).unwrap();
+        let allocation_info = allocator.get_allocation_info(&allocation);
         assert_ne!(allocation_info.mapped_data, std::ptr::null_mut());
-        allocator.destroy_buffer(buffer, allocation);
+        allocator.destroy_buffer(buffer, &mut allocation);
     }
 }
 
@@ -247,10 +245,10 @@ fn create_gpu_buffer_pool() {
 
         let pool = allocator.create_pool(&pool_info).unwrap();
 
-        let (buffer, allocation) = pool.create_buffer(&buffer_info, &allocation_info).unwrap();
-        let allocation_info = allocator.get_allocation_info(&allocation).unwrap();
+        let (buffer, mut allocation) = pool.create_buffer(&buffer_info, &allocation_info).unwrap();
+        let allocation_info = allocator.get_allocation_info(&allocation);
         assert_ne!(allocation_info.mapped_data, std::ptr::null_mut());
-        allocator.destroy_buffer(buffer, allocation);
+        allocator.destroy_buffer(buffer, &mut allocation);
     }
 }
 
@@ -269,7 +267,7 @@ fn test_gpu_stats() {
         assert_eq!(stats_1.total.statistics.allocationCount, 0);
         assert_eq!(stats_1.total.statistics.allocationBytes, 0);
 
-        let (buffer, allocation) = allocator
+        let (buffer, mut allocation) = allocator
             .create_buffer(
                 &ash::vk::BufferCreateInfo::builder()
                     .size(16 * 1024)
@@ -287,7 +285,7 @@ fn test_gpu_stats() {
         assert_eq!(stats_2.total.statistics.allocationCount, 1);
         assert_eq!(stats_2.total.statistics.allocationBytes, 16 * 1024);
 
-        allocator.destroy_buffer(buffer, allocation);
+        allocator.destroy_buffer(buffer, &mut allocation);
 
         let stats_3 = allocator.calculate_statistics().unwrap();
         assert_eq!(stats_3.total.statistics.blockCount, 1);
@@ -298,16 +296,17 @@ fn test_gpu_stats() {
 
 #[test]
 fn create_virtual_block() {
-    let create_info = vk_mem::VirtualBlockCreateInfo::new().size(16 * 1024 * 1024); // 16MB block
-    let _virtual_block = vk_mem::VirtualBlock::new(create_info)
-        .expect("Couldn't create VirtualBlock");
+    let create_info = vk_mem::VirtualBlockCreateInfo::new()
+        .size(16 * 1024 * 1024)
+        .flags(vk_mem::VirtualBlockCreateFlags::VMA_VIRTUAL_BLOCK_CREATE_LINEAR_ALGORITHM_BIT); // 16MB block
+    let _virtual_block = vk_mem::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
 }
 
 #[test]
 fn virtual_allocate_and_free() {
     let create_info = vk_mem::VirtualBlockCreateInfo::new().size(16 * 1024 * 1024); // 16MB block
-    let virtual_block = vk_mem::VirtualBlock::new(create_info)
-        .expect("Couldn't create VirtualBlock");
+    let mut virtual_block =
+        vk_mem::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
 
     let allocation_info = vk_mem::VirtualAllocationCreateInfo {
         size: 8 * 1024 * 1024,
@@ -318,11 +317,11 @@ fn virtual_allocate_and_free() {
 
     // Fully allocate the VirtualBlock and then free both allocations
     unsafe {
-        let (virtual_alloc_0, offset_0) = virtual_block.allocate(allocation_info).unwrap();
-        let (virtual_alloc_1, offset_1) = virtual_block.allocate(allocation_info).unwrap();
+        let (mut virtual_alloc_0, offset_0) = virtual_block.allocate(allocation_info).unwrap();
+        let (mut virtual_alloc_1, offset_1) = virtual_block.allocate(allocation_info).unwrap();
         assert_ne!(offset_0, offset_1);
-        virtual_block.free(virtual_alloc_0);
-        virtual_block.free(virtual_alloc_1);
+        virtual_block.free(&mut virtual_alloc_0);
+        virtual_block.free(&mut virtual_alloc_1);
     }
 
     // Fully allocate it again and then clear it
@@ -340,8 +339,8 @@ fn virtual_allocate_and_free() {
 #[test]
 fn virtual_allocation_user_data() {
     let create_info = vk_mem::VirtualBlockCreateInfo::new().size(16 * 1024 * 1024); // 16MB block
-    let virtual_block = vk_mem::VirtualBlock::new(create_info)
-        .expect("Couldn't create VirtualBlock");
+    let mut virtual_block =
+        vk_mem::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
 
     let user_data = Box::new(vec![12, 34, 56, 78, 90]);
     let allocation_info = vk_mem::VirtualAllocationCreateInfo {
@@ -352,20 +351,21 @@ fn virtual_allocation_user_data() {
     };
 
     unsafe {
-        let (virtual_alloc_0, _) = virtual_block.allocate(allocation_info).unwrap();
-        let queried_info = virtual_block.get_allocation_info(&virtual_alloc_0)
+        let (mut virtual_alloc_0, _) = virtual_block.allocate(allocation_info).unwrap();
+        let queried_info = virtual_block
+            .get_allocation_info(&virtual_alloc_0)
             .expect("Couldn't get VirtualAllocationInfo from VirtualBlock");
         let queried_user_data = std::slice::from_raw_parts(queried_info.user_data as *const i32, 5);
         assert_eq!(queried_user_data, &*user_data);
-        virtual_block.free(virtual_alloc_0);
+        virtual_block.free(&mut virtual_alloc_0);
     }
 }
 
 #[test]
 fn virtual_block_out_of_space() {
     let create_info = vk_mem::VirtualBlockCreateInfo::new().size(16 * 1024 * 1024); // 16MB block
-    let virtual_block = vk_mem::VirtualBlock::new(create_info)
-        .expect("Couldn't create VirtualBlock");
+    let mut virtual_block =
+        vk_mem::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
 
     let allocation_info = vk_mem::VirtualAllocationCreateInfo {
         size: 16 * 1024 * 1024 + 1,
@@ -377,7 +377,7 @@ fn virtual_block_out_of_space() {
     unsafe {
         match virtual_block.allocate(allocation_info) {
             Ok(_) => panic!("Created VirtualAllocation larger than VirtualBlock"),
-            Err(ash::vk::Result::ERROR_OUT_OF_DEVICE_MEMORY) => {},
+            Err(ash::vk::Result::ERROR_OUT_OF_DEVICE_MEMORY) => {}
             Err(_) => panic!("Unexpected VirtualBlock error"),
         }
     }

@@ -1,9 +1,9 @@
 use crate::ffi;
 use ash::vk;
 use ash::vk::PhysicalDevice;
+use ash::{Device, Instance};
 use bitflags::bitflags;
 use std::marker::PhantomData;
-use std::ops::Deref;
 use std::ptr;
 
 /// Intended usage of memory.
@@ -376,21 +376,20 @@ bitflags! {
     }
 }
 
-pub struct AllocatorCreateInfo<'a, I, D> {
+pub struct AllocatorCreateInfo<'a> {
     pub(crate) inner: ffi::VmaAllocatorCreateInfo,
     pub(crate) physical_device: PhysicalDevice,
-    pub(crate) instance: I,
-    pub(crate) device: D,
-    pub(crate) _phantom_data: PhantomData<&'a u8>,
+    pub(crate) device: &'a Device,
+    pub(crate) instance: &'a Instance,
 }
 
-impl<'a, I, D> AllocatorCreateInfo<'a, I, D>
-where
-    I: Deref<Target = ash::Instance>,
-    D: Deref<Target = ash::Device>,
-{
-    pub fn new(instance: I, device: D, physical_device: ash::vk::PhysicalDevice) -> Self {
-        Self {
+impl<'a> AllocatorCreateInfo<'a> {
+    pub fn new(
+        instance: &'a ash::Instance,
+        device: &'a ash::Device,
+        physical_device: ash::vk::PhysicalDevice,
+    ) -> AllocatorCreateInfo<'a> {
+        AllocatorCreateInfo {
             inner: ffi::VmaAllocatorCreateInfo {
                 flags: 0,
                 physicalDevice: physical_device,
@@ -407,7 +406,6 @@ where
             physical_device,
             device,
             instance,
-            _phantom_data: Default::default(),
         }
     }
 
@@ -463,7 +461,7 @@ where
 
 pub struct PoolCreateInfo<'a> {
     pub(crate) inner: ffi::VmaPoolCreateInfo,
-    marker: ::std::marker::PhantomData<&'a ()>,
+    marker: PhantomData<&'a ()>,
 }
 
 impl<'a> PoolCreateInfo<'a> {
@@ -479,7 +477,7 @@ impl<'a> PoolCreateInfo<'a> {
                 minAllocationAlignment: 0,
                 pMemoryAllocateNext: ptr::null_mut(),
             },
-            marker: ::std::marker::PhantomData,
+            marker: PhantomData,
         }
     }
 
@@ -675,8 +673,6 @@ impl From<ffi::VmaAllocationInfo> for AllocationInfo {
     }
 }
 
-
-
 bitflags! {
     /// Flags for configuring `VirtualBlock` construction
     pub struct VirtualBlockCreateFlags: u32 {
@@ -777,6 +773,11 @@ impl<'a> VirtualBlockCreateInfo<'a> {
         self.inner.size = size;
         self
     }
+
+    pub fn flags(mut self, flag: VirtualBlockCreateFlags) -> Self {
+        self.inner.flags = flag.bits;
+        self
+    }
 }
 
 impl From<&ffi::VmaVirtualAllocationInfo> for VirtualAllocationInfo {
@@ -810,4 +811,3 @@ impl From<VirtualAllocationCreateInfo> for ffi::VmaVirtualAllocationCreateInfo {
         (&info).into()
     }
 }
-
